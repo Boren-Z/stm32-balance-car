@@ -1,0 +1,11 @@
+# Compilation artifacts
+Objects/
+Listings/
+
+# Personal Editor/Debugger Configuration
+.vscode/
+DebugConfig/
+*.uvoptx
+*.uvguix.*
+*.pdb
+
