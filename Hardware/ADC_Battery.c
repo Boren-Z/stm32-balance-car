@@ -1,104 +1,75 @@
 #include "stm32f10x.h"
 
 
-static volatile uint16_t Voltage_Anal;   // ADC原始值，0~4095
-static volatile uint8_t  JEOC_Status;    // 新数据标志位，1=有新数据
+static volatile uint16_t Voltage_Anal;   // Raw ADC Data, 0~4095
+static volatile uint8_t  JEOC_Status;    // New Data Flag, 1 means new data arrived
 
 static volatile float Vbat = 0.0f;
 
 
-/* ----------------------------------------------------------------
- * [反馈处理层接口] 获取原始ADC值
- *
- * 用途：监控层阈值判断，直接比较ADC值效率更高，避免浮点运算
- * 阈值对照（由硬件参数推导，分压比=3.3/8.4）：
- *   > 3399 → 电量70%~100%（三灯亮）
- *   > 3193 → 电量40%~70% （两灯亮）
- *   > 2990 → 电量10%~40% （一灯亮）
- *   ≤ 2990 → 电量<10%    （全灭，需充电）
- * ---------------------------------------------------------------- */
+/* 
+ * [Feedback processing layer interface] Get raw ADC value
+ * Purpose: For monitoring-layer threshold checks — 
+ * comparing raw ADC values directly is more efficient and avoids floating-point math
+ * Threshold reference          (derived from hardware parameters, voltage-divider ratio = 3.3/8.4):
+ *  3399 → Battery 70%~100%     (three LEDs on)
+ *  3193 → Battery 40%~70%      (two LEDs on)
+ *  2990 → Battery 10%~40%      (one LED on)
+ * ≤2990 → Battery <10%         (all off, needs charging)
+ * */
 
 uint16_t Battery_GetVoltageAnal(void)
 {
     return Voltage_Anal;
 }
 
-/* ----------------------------------------------------------------
- * [反馈处理层接口] 获取换算后的实际电压值
+/* 
+ * [Feedback processing layer interface] Get the converted actual voltage value
  *
- * 换算公式推导：
- *   V_bat = ADC值 × (VREF+ / 4095) × (1 / 分压比)
- *         = ADC值 × (3.3 / 4095) × (8.4 / 3.3)
- *         = ADC值 × (8.4 / 4095)    ← 3.3约分消掉
- *
- * 【为什么加f后缀？】
- *   3.3和4095默认是double类型，STM32上double运算慢。
- *   加f后缀明确为float，运算更快。
- *
- * 用途：调试打印，人可读的电压值（配合sprintf使用）
- * ---------------------------------------------------------------- */
-
+ * Conversion formula derivation:
+ *   V_bat = ADC value × (VREF+ / 4095) × (1 / divider ratio)
+ *         = ADC value × (3.3 / 4095) × (8.4 / 3.3)
+ *         = ADC value × (8.4 / 4095)
+ * */
 
 float Battery_GetVoltage(void)
 {
-    return Vbat + 1.4f;
+    return Vbat + 1.4f;     //Adding the f suffix explicitly makes them float, which is faster.
 }
 
-/* ----------------------------------------------------------------
- * [调度层接口] 查询是否有新的ADC数据
- *
- * 读取后自动清零——防止同一次数据被主循环重复处理。
- * 这是"消费型flag"的标准写法：
- *   中断举旗(JEOC_Status=1) → 主循环消费(读走并清零) → 等待下次中断
- *
- * 【前后台模型的体现】
- *   中断（前台）：只负责采数据、举旗，越快越好
- *   主循环（后台）：看到旗子才执行业务逻辑（比较阈值、控制LED）
- *   中断不直接控制LED，避免中断里执行过多逻辑影响实时性
- * ---------------------------------------------------------------- */
+/* 
+ * [Scheduler layer interface] Check whether new ADC data is available
+ * */
 uint8_t Battery_GetFlag(void)
 {
     uint8_t temp = JEOC_Status;
-    JEOC_Status = 0;          // 读完清零，防止重复消费
+    JEOC_Status = 0;          // Cleared after being read, to prevent duplicate consumption.
     return temp;
 }
 
 /**
- * ================================================================
- * [驱动层] ADC电池电压采集 - 定时器初始化
- * ================================================================
- *
- * 职责：
- *   配置TIM2为10ms周期定时器，通过TRGO硬件触发ADC注入组采样。
- *   本函数是ADC定时触发的唯一硬件入口，上层无需关心定时细节。
- *
- * 硬件约束（来自原理图）：
- *   TIM2挂载于APB1总线，系统时钟72MHz
- *
- * 定时参数推导：
- *   预分频 = 72-1  → 分频后计数时钟 = 1MHz = 每计数1微秒
- *   ARR    = 10000-1 → 计数10000次溢出 = 10ms周期
- *   触发频率 = 100Hz（每秒触发100次ADC采样）
+ * [Driver layer] ADC battery voltage acquisition - Timer initialization
+ * Configure TIM2 as a 10ms periodic timer, triggering ADC injected-group sampling via TRGO hardware trigger.
  */
 void ADC_Battery_TIM_Init(void)
 {
-    /* [1] 开启TIM2时钟
-     * TIM2挂载APB1总线（低速，最高36MHz，经倍频后72MHz提供给TIM） */
+    /* [1] Enable TIM2 clock
+     * TIM2 is on the APB1 bus (low-speed, max 36MHz; 
+     * after frequency multiplication, 72MHz is supplied to the timer) */
     RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM2, ENABLE);
 
-    /* [2] 配置时基参数 */
+    /* [2] Configure time-base parameters */
     TIM_TimeBaseInitTypeDef TIM_TimeBaseInitStructure;
 
-    TIM_TimeBaseInitStructure.TIM_Prescaler     = 72 - 1;               // 72MHz→1MHz，每计数1μs
-    TIM_TimeBaseInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;         // 时钟分割，保持默认
-    TIM_TimeBaseInitStructure.TIM_CounterMode   = TIM_CounterMode_Up;   // 向上计数，0→ARR溢出
-    TIM_TimeBaseInitStructure.TIM_Period        = 10000 - 1;            // 10000μs = 10ms溢出
+    TIM_TimeBaseInitStructure.TIM_Prescaler     = 72 - 1;               // 72MHz->1MHz, 1μs per count
+    TIM_TimeBaseInitStructure.TIM_ClockDivision = TIM_CKD_DIV1;         // keep default
+    TIM_TimeBaseInitStructure.TIM_CounterMode   = TIM_CounterMode_Up;   // Counting up, 0→ARR overflow
+    TIM_TimeBaseInitStructure.TIM_Period        = 10000 - 1;            // 10000μs = 10ms overflow
 
     TIM_TimeBaseInit(TIM2, &TIM_TimeBaseInitStructure);
 
-    /* [3] 配置TRGO输出源为Update事件
-     * 每次计数器溢出（Update事件）时，TRGO向ADC发出触发信号
-     * 注意：TIM_TRGOSource_Enable ≠ 使能TRGO，而是"启动时触发一次" */
+    /* [3] Configure the TRGO output source as the Update event
+     * Each time the counter overflows (Update event), TRGO issues a trigger signal to the ADC*/
     TIM_SelectOutputTrigger(TIM2, TIM_TRGOSource_Update);
 
     /* [4] 使能TIM2，开始计数
