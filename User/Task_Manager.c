@@ -206,21 +206,3 @@ void Task_Manager_Run(void)
 
 
 
-
-// /*第二：回调函数指针*/
-// typedef void (*Handler)(void);
-
-// /*第三：状态机调度函数*/
-// int State_Machine_Handler(SYS_Event event);
-
-// /*第四：状态机执行函数*/
-// void IDLE_Handler(void);
-// void CHECK_Handler(void);
-// void STARTUP_Handler(void);
-// void BALANCE_Handler(void);
-// void SLEEP_Handler(void);
-
-// /*第五：对外接口，主循环调用*/
-// void Task_Manager_Run(void);
-// void Task_Manager_SetEvent(SYS_Event event);
-

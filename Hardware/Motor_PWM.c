@@ -1,64 +1,5 @@
 #include "stm32f10x.h"
 
-/**
- * ================================================================
- * 【五层塔定位】驱动层 - 电机驱动模块
- * ================================================================
- *
- * 本模块在五层塔中的位置：
- *
- *   算法层    → 调用Motor_Speed_Set()输出PID控制量
- *   驱动层    ← 本模块，激活TIM1/TIM4 PWM + TB6612 GPIO
- *
- * 硬件架构：
- *   STM32 → TB6612FNG(H桥驱动) → 电机
- *
- *   左电机：
- *     MOTOR_L_PWM  → PA8  → TIM1_CH1（速度，复用推挽）
- *     MOTOR_L_IN1  → PA9  → GPIO（方向，普通推挽）
- *     MOTOR_L_IN2  → PA10 → GPIO（方向，普通推挽）
- *
- *   右电机：
- *     MOTOR_R_PWM  → PB6  → TIM4_CH1（速度，复用推挽）
- *     MOTOR_R_IN1  → PB5  → GPIO（方向，普通推挽）
- *     MOTOR_R_IN2  → PB7  → GPIO（方向，普通推挽）
- *
- *   TB6612使能：
- *     TB6612_STBY  → PA1  → GPIO（普通推挽，初始化后拉高）
- *
- * 对外接口（.h文件声明，外部只能看到这两个）：
- *   Double_Motors_Init()     → Action接口，初始化所有电机硬件
- *   Motor_Speed_Set()        → Set接口，算法层写入控制量
- *
- * 内部函数（static，外部不可见）：
- *   Motor_GPIO_Init()        → 方向控制引脚初始化
- *   Motor_Left_PWM_Init()    → 左电机PWM初始化（TIM1）
- *   Motor_Right_PWM_Init()   → 右电机PWM初始化（TIM4）
- *
- * 【五层塔封装原则】
- *   数据默认private（static），接口默认public（.h声明）
- *   算法层只需调用Motor_Speed_Set()，不需要知道TIM1/TIM4/IN1/IN2的存在
- *   镜像安装的硬件细节封装在驱动层，算法层完全不感知
- *
- * 【两种初始化的区分】
- *   性质类初始化（Motor_GPIO_Init）→ 配置引脚模式，决定"能不能控制"
- *   数值类初始化（Motor_PWM_Init） → 配置PWM参数，决定"频率是多少"
- *   运行时更新（Motor_Speed_Set）  → 实时改变CCR和IN电平
- *
- * 【PWM频率选择10kHz的原因】
- *   太低(<1kHz)  → 电机嗡嗡响，电流波动大，效率低
- *   太高(>100kHz)→ TB6612开关损耗大，发热严重
- *   10kHz        → 高于人耳上限（20kHz边界），开关损耗可接受
- *                  控制周期5ms(200Hz)远低于PWM频率，电机响应足够快
- *
- * 【关于复用推挽输出】
- *   PWM引脚（PA8/PB6）→ 复用推挽（AF_PP）
- *     TIM1/TIM4外设控制引脚，CPU不参与，引脚控制权交给定时器
- *   方向引脚（PA9/PA10/PB5/PB7）→ 普通推挽（Out_PP）
- *     CPU通过GPIO寄存器直接控制高低电平
- *   判断方法：谁控制这个引脚？STM32内部外设→复用，CPU直接→普通
- * ================================================================
- */
 
 /**
  * TB6612FNG H桥控制真值表
@@ -95,30 +36,10 @@
  */
 
 /**
- * ================================================================
- * [驱动层-内部] 电机方向控制GPIO初始化（static，外部不可见）
- * ================================================================
- *
- * 职责：配置IN1/IN2方向控制引脚和TB6612使能引脚
- *
- * 【曾犯的错误】
- *   1. GPIO结构体重复声明
- *      同一函数内，同一结构体类型只声明一次
- *      第二次直接修改成员变量，重新调用Init即可
- *
- *   2. 引脚号写成数字1而不是GPIO_Pin_1
- *      正确：GPIO_InitStructure.GPIO_Pin = GPIO_Pin_1
- *
- *   3. GPIOB里混入了GPIOA的引脚
- *      PA9/PA10属于GPIOA，不能在GPIOB的Init里出现
- *
- *   4. Bit_SET写成SET
- *      正确：GPIO_WriteBit(GPIOA, GPIO_Pin_1, Bit_SET)
- *
+ * [驱动层-内部] 电机方向控制GPIO初始化
  * 【STBY引脚的作用】
  *   TB6612_STBY = PA1，初始化后必须拉高
  *   否则TB6612处于Standby状态，所有输出高阻态，电机不响应任何控制
- * ================================================================
  */
 static void Motor_GPIO_Init(void)
 {
@@ -187,7 +108,7 @@ static void Motor_Left_PWM_Init(void)
 
     /* 时基配置：72MHz/72/100 = 10kHz PWM频率 */
     TIM_TimeBaseInitTypeDef TIM_TimeBaseInitStructure;
-    TIM_TimeBaseInitStructure.TIM_ClockDivision     = TIM_CKD_DIV1;
+    TIM_TimeBaseInitStructure.TIM_ClockDivision      = TIM_CKD_DIV1;
     TIM_TimeBaseInitStructure.TIM_CounterMode        = TIM_CounterMode_Up;
     TIM_TimeBaseInitStructure.TIM_Period             = 100 - 1;   // ARR=99
     TIM_TimeBaseInitStructure.TIM_Prescaler          = 72 - 1;    // 72MHz→1MHz
@@ -215,21 +136,12 @@ static void Motor_Left_PWM_Init(void)
 }
 
 /**
- * ================================================================
  * [驱动层-内部] 右电机PWM初始化（TIM4_CH1，PB6）（static）
- * ================================================================
  *
  * TIM4是通用定时器，比TIM1简单：
  *   无TIM_RepetitionCounter
  *   无互补输出参数
  *   无需TIM_CtrlPWMOutputs()
- *
- * 【曾犯的错误】
- *   TIM4时钟写成RCC_APB2PeriphClockCmd(RCC_APB1Periph_TIM4)
- *   函数和参数总线不匹配（函数是APB2，参数是APB1）
- *   正确：RCC_APB1PeriphClockCmd(RCC_APB1Periph_TIM4, ENABLE)
- *   TIM4挂载APB1总线，TIM1挂载APB2总线
- * ================================================================
  */
 static void Motor_Right_PWM_Init(void)
 {
@@ -267,9 +179,7 @@ static void Motor_Right_PWM_Init(void)
 }
 
 /**
- * ================================================================
  * [驱动层] 双电机初始化（对外Action接口）
- * ================================================================
  *
  * 职责：封装三个内部初始化函数，对外暴露统一入口
  * 调用方只需要调用这一个函数，不需要知道内部有三个步骤
@@ -283,7 +193,6 @@ static void Motor_Right_PWM_Init(void)
  *   把Double_Motors_Init()放在文件最上面，但它调用的三个函数
  *   定义在后面，编译器从上往下读，看到调用时还不认识这些函数。
  *   解决：把Double_Motors_Init()移到三个内部函数后面
- * ================================================================
  */
 void Double_Motors_Init(void)
 {

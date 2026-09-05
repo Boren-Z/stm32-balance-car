@@ -120,23 +120,5 @@ void EncoderFeedback_GetSpeed(SpeedFeedback* Outputs)
     *Outputs = Speed_Output;
 }
 
-/**
- * =======================旧设计====================================
- * [反馈层] 编码器速度更新（对外Update接口，Task_Manager每5ms调用）
- * ================================================================
- *
- * 换算公式：
- *   轮速(rad/s) = 脉冲增量 / (线数 × 减速比) × 2π / dt
- *   物理意义：脉冲增量÷总脉冲数=转了几圈，×2π=弧度，÷dt=rad/s
- **/
 
-// void EncoderFeedback_Update(void)
-// {
-//     Speed_Output.Left_Speed  = (float)Encoder_Get_L_Speed()
-//                                / (ENCODER_LINE_COUNTE * REDUCTION_RATIO)
-//                                * (2 * 3.1415926f / FEEDBACK_DT);
 
-//     Speed_Output.Right_Speed = (float)Encoder_Get_R_Speed()
-//                                / (ENCODER_LINE_COUNTE * REDUCTION_RATIO)
-//                                * (2 * 3.1415926f / FEEDBACK_DT);
-// }
