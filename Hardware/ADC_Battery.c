@@ -72,141 +72,107 @@ void ADC_Battery_TIM_Init(void)
      * Each time the counter overflows (Update event), TRGO issues a trigger signal to the ADC*/
     TIM_SelectOutputTrigger(TIM2, TIM_TRGOSource_Update);
 
-    /* [4] 使能TIM2，开始计数
-     * 使能后计数器从0开始，每10ms产生一次Update事件和TRGO信号 */
+    /* [4] Enable TIM2, start counting */
     TIM_Cmd(TIM2, ENABLE);
 }
 
 /**
- * ================================================================
- * [驱动层] ADC电池电压采集 - ADC初始化
- * ================================================================
+ * [Driver layer] ADC battery voltage acquisition - ADC initialization
  *
- * 职责：
- *   配置ADC1注入组，采集PB0(ADC1_CH8)的电池分压信号。
- *   由TIM2_TRGO每10ms硬件触发一次，转换完成触发JEOC中断。
- *
- * 硬件约束（来自原理图）：
- *   VBAT_SENSE → PB0 → ADC1_CH8
- *   分压网络：R6=5.1kΩ（上），R14=3.3kΩ（下）
- *   分压比 = R14/(R6+R14) = 3.3/8.4
- *   VREF+ = 3.3V（接3V3电源轨，由MT2492提供）
- *   → 满电8.4V经分压后 = 3.3V = ADC满量程4095
- *
- * 信号流（五层塔驱动层的核心链路）：
- *   TIM2_TRGO(10ms) → ADC1注入组采样CH8(PB0)
- *   → 转换完成 → 结果存入JDR1 → 触发JEOC中断
- *   → 中断读取JDR1 → 存入Voltage_Anal → 举JEOC_Status旗
- *   → 主循环看到旗子 → 比较阈值 → 控制LED
- *
- * 外设初始化的通用顺序（重要，不能随意颠倒）：
- *   1. 开时钟
- *   2. 配GPIO
- *   3. 配外设参数（填结构体→Init）
- *   4. 使能外设
- *   5. 特殊步骤（ADC需要校准）
- *   6. 使能触发和中断
+ *  Signal flow:
+ *   TIM2_TRGO(10ms) → ADC1 injected-group samples CH8(PB0)
+ *   → Conversion complete → Result stored in JDR1 → Triggers JEOC interrupt
+ *   → Interrupt reads JDR1 → Stores into Voltage_Anal → Raises JEOC_Status flag
+ *   → Main loop sees the flag → Compares threshold → Controls LEDs
  *
  */
 void ADC_Battery_Init(void)
 {
-    /* [1] 开启ADC1和GPIOB时钟（均挂载APB2总线） */
+    /* [1] Enable ADC1 and GPIOB clocks (both on the APB2 bus) */
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_ADC1,  ENABLE);
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB, ENABLE);
 
-    /* [2] PB0配置为模拟输入
-     * 模拟输入不需要配置Speed，GPIO_Mode_AIN下该参数无意义 */
+    /* [2] Configure PB0 as analog input*/
     GPIO_InitTypeDef GPIO_InitStructure;
     GPIO_InitStructure.GPIO_Mode = GPIO_Mode_AIN;
     GPIO_InitStructure.GPIO_Pin  = GPIO_Pin_0;
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
-    /* [3] 配置注入组通道（注入组专属函数，不在ADC_InitTypeDef里）
-     * 通道8对应PB0，注入序列第1位，采样时间7.5个周期
-     * 信号源阻抗低（R6+R14并联≈2kΩ），采样时间不需要太长 */
+    /* [3] Configure the injected-group channel (an injected-group-specific function, not part of ADC_InitTypeDef) */
     ADC_InjectedChannelConfig(ADC1, ADC_Channel_8, 1, ADC_SampleTime_1Cycles5);
 
-    /* [4] 配置注入组外部触发源为TIM2_TRGO（注入组专属函数）
-     * TIM2_TRGO只在注入组触发源列表里，规则组列表里没有它
-     * 这是选择注入组而非规则组的根本原因（硬件约束决定） */
+    /* [4] Configure the injected-group external trigger source as TIM2_TRGO (an injected-group-specific function)
+     * TIM2_TRGO is only in the injected-group trigger source list, 
+     * not in the regular-group list (dictated by hardware constraints, fundemental reason) */
     ADC_ExternalTrigInjectedConvConfig(ADC1, ADC_ExternalTrigInjecConv_T2_TRGO);
 
-    /* [5] 配置ADC基本参数（规则组参数，对注入组无影响）
-     * ExternalTrigConv设为None，明确表示规则组不使用外部触发 */
+    /* [5] Configure basic ADC parameters (regular-group parameters, no effect on the injected group); 
+     * the regular group does not use an external trigger */
     ADC_InitTypeDef ADC_InitStructure;
-    ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;                     // 单次转换，由TIM触发，不自动连续
-    ADC_InitStructure.ADC_DataAlign          = ADC_DataAlign_Right;         // 右对齐，结果在低12位，直接读0~4095
-    ADC_InitStructure.ADC_ExternalTrigConv   = ADC_ExternalTrigConv_None;   // 规则组不用外部触发
-    ADC_InitStructure.ADC_Mode               = ADC_Mode_Independent;        // 独立模式，ADC1独立工作
-    ADC_InitStructure.ADC_NbrOfChannel       = 1;                           // 规则组转换1个通道
-    ADC_InitStructure.ADC_ScanConvMode       = DISABLE;                     // 单通道不需要扫描模式
-    ADC_Init(ADC1, &ADC_InitStructure);                                     // 必须调用Init才能生效！
+    // Single conversion, triggered by the timer, not automatically continuous
+    ADC_InitStructure.ADC_ContinuousConvMode = DISABLE;                     
+    // Right-aligned, result in the low 12 bits, read directly as 0~4095
+    ADC_InitStructure.ADC_DataAlign          = ADC_DataAlign_Right;         
+    // Regular group does not use an external trigger
+    ADC_InitStructure.ADC_ExternalTrigConv   = ADC_ExternalTrigConv_None;   
+    // Independent mode, ADC1 operates independently
+    ADC_InitStructure.ADC_Mode               = ADC_Mode_Independent;     
+    // Regular group converts 1 channel
+    ADC_InitStructure.ADC_NbrOfChannel       = 1; 
+    // Single channel doesn't need scan mode                          
+    ADC_InitStructure.ADC_ScanConvMode       = DISABLE;                     
+    ADC_Init(ADC1, &ADC_InitStructure);                                     
 
-    /* [6] 使能ADC1
-     * 必须先使能，后面的校准和触发配置才有效 */
+    /* [6] Power on ADC1 */
     ADC_Cmd(ADC1, ENABLE);
 
-    /* [7] ADC自校准
-     * 消除内部电容误差，提高转换精度，上电必须执行一次
-     * SET=校准进行中（继续等），RESET=校准完成（退出循环）
-     * 口诀：等到"好了"才动手 */
+    /* [7] ADC self-calibration, eliminating internal capacitor error and improving conversion accuracy */
     ADC_StartCalibration(ADC1);
     while(ADC_GetCalibrationStatus(ADC1) == SET);
 
-    /* [8] 使能注入组外部触发
-     * 必须在ADC_Cmd(ENABLE)之后调用才有效
-     * 使能后TIM2_TRGO信号才能真正触发ADC开始转换 */
+    /* [8] Enable the injected-group external trigger; 
+     * only after enabling can the TIM2_TRGO signal actually trigger the ADC to start conversion */
     ADC_ExternalTrigInjectedConvCmd(ADC1, ENABLE);
 
-    /* [9] 使能JEOC中断
-     * 注入组转换完成时触发中断，在IRQHandler里读取JDR1结果 */
+    /* [9] Enable JEOC interrupt
+     * Triggers an interrupt when the injected-group conversion completes; 
+     * read the JDR1 result inside the IRQHandler */
     ADC_ITConfig(ADC1, ADC_IT_JEOC, ENABLE);
 }
 
 /**
- * ================================================================
- * [驱动层] NVIC中断控制器配置
- * ================================================================
- *
- * NVIC负责决定多个中断同时发生时谁先执行、谁能打断谁。
- *
- * 优先级分组（在main.c里全局配置一次）：
- *   NVIC_PriorityGroup_2 → 抢占优先级2位(0~3)，子优先级2位(0~3)
- *
- * 本模块优先级：抢占2，子优先级2
- *   低于TIM3时基（抢占0），保证控制节拍不被打断
- *   ADC电压采样可以稍慢，偶尔被打断没有影响
- *
+ * [Driver layer] NVIC interrupt controller configuration
+ * This module's priority: preemption 2, subpriority 2 Lower than the TIM3 time base (preemption 0), 
+ * ensuring the control cadence is never interrupted
+ * ADC voltage sampling can afford to be a bit slower — occasional interruption has no impact
  */
 void NVIC_Battery_Init(void)
 {
     NVIC_InitTypeDef NVIC_InitStructure;
-    NVIC_InitStructure.NVIC_IRQChannel                   = ADC1_2_IRQn; // ADC1和ADC2共用中断通道
+    NVIC_InitStructure.NVIC_IRQChannel                   = ADC1_2_IRQn; // Shares the interrupt channel with ADC2
     NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;           // 低于TIM3时基(0)
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;           // Lower than the TIM3 time base (0)
     NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 2;
     NVIC_Init(&NVIC_InitStructure);
 }
 
 
 /**
- * ================================================================
- * [驱动层] ADC注入组转换完成中断处理函数
- * ================================================================
- *
- * 触发条件：ADC1注入组转换完成（JEOC标志位置位）
+ * [Driver layer] ADC injected-group conversion-complete interrupt handler
+ * 
+ * Condition: ADC1 injected-group conversion complete (JEOC flag set)
 **/
 void ADC1_2_IRQHandler(void)
 {
     if(ADC_GetFlagStatus(ADC1, ADC_FLAG_JEOC) == SET)
     {
-        /* 读取原始ADC值 */
+        /* Read the raw ADC value */
         Voltage_Anal = ADC_GetInjectedConversionValue(ADC1, ADC_InjectedChannel_1);
 
-        /* 直接换算成浮点电压（对齐标准代码） */
+        /* Directly convert to a floating-point voltage (aligned with standard code) */
         Vbat = Voltage_Anal / 4095.0f * 8.4f;
 
-        /* 举旗通知 */
+        /* Raise the flag to notify */
         JEOC_Status = 1;
 
         ADC_ClearITPendingBit(ADC1, ADC_IT_JEOC);
