@@ -250,20 +250,9 @@ void Control_Motor_Update(void)
     // value; the actual floor was tuned experimentally, left as 0.0f here.
     if(vbat < 0.0f) vbat = 0.0f;
 
-    // Debug print: check the actual battery voltage
-    // char buf[32];
-    // sprintf(buf, "vbat:%.2f\r\n", vbat);
-    // Debugging_USART_SendString(buf);
-
     // Convert to a PWM duty-cycle output
     int16_t duty_l = (int16_t)(ua_l / vbat * 100.0f);
     int16_t duty_r = (int16_t)(ua_r / vbat * 100.0f);
-
-    // Debug print: check target/feedback/PID output/final duty cycle
-    // char buf[80];
-    // sprintf(buf, "SP_L:%.2f FB_L:%.2f ua_l:%.2f duty_l:%d\r\n",
-    //         State_MotorOmega_L.SP, Speed_FB.Left_Speed, ua_l, duty_l);
-    // Debugging_USART_SendString(buf);
 
     Motor_Speed_Set(duty_l, duty_r);
 }
