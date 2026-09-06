@@ -3,7 +3,7 @@
 
 
 
-/* 新方案（T法，对齐标准代码）*/
+/* T法*/
 static volatile int64_t encoder_l = 0;
 static volatile int64_t encoder_r = 0;
 static volatile int8_t  direction_l = 1;
