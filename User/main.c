@@ -14,86 +14,15 @@
 
 /**
  *   - Main function
- * Based on the "Five-Layer + Defensive Programming" architecture theory
  *
- *   Five-layer tower architecture overview
- *   Monitoring layer      → low-voltage protection / tilt-angle emergency stop / watchdog / LED battery indicator
- *   Scheduling layer      → SysTick time base (1ms) / foreground-background task scheduling / flag mechanism
- *   Algorithm layer       → cascaded PID (angular velocity loop → angle loop → velocity loop)
- *   Feedback processing   → MPU6050 Euler-angle estimation / encoder M/T speed measurement / ADC conversion
- *   Driver layer          → GPIO/USART/TIM/ADC/I2C hardware activation and read/write
+ * Architecture: 5-layer "OLA" tower + defensive programming.
+ * See README.md for the full architecture breakdown, design principles,
+ * and the foreground/background scheduling model.
  *
- * Core principles of the theory:
- *
- * 1. Separation of Concerns
- *    Each layer does exactly one thing, communicating with adjacent
- *    layers only through interfaces, with no need to know what a
- *    non-adjacent layer is doing.
- *    → The driver layer doesn't know about PID, the algorithm layer doesn't know about registers
- *
- * 2. Requirements are derived top-down, constraints are reported bottom-up
- *    The monitoring layer defines "what's needed," the driver layer decides "what's possible"
- *    → Why SysTick: it doesn't compete with TIM1/TIM2/TIM4, which are
- *      already claimed by motor PWM and the ADC trigger — SysTick is a
- *      core Cortex-M peripheral, always available no matter how the
- *      general-purpose timers are allocated
- *
- * 3. Interfaces before implementation
- *    First define what each layer exposes externally (the .h file), then fill in the implementation (the .c file)
- *    → Data is hidden inside the .c file (static), interfaces are exposed in the .h file (function declarations)
- *
- * 4. Program to interfaces
- *    An upper layer calls interface functions, never touches a lower layer's internal variables directly
- *    → main.c only calls Battery_GetFlag(), never reads JEOC_Status directly
- *
- * Defensive programming principles:
- *
- * 1. Parameter validation at entry
- *    A function validates its parameters right at entry; illegal parameters report an error and return immediately
- *    → SendBytes: if(array==NULL || size==0) report_error(...)
- *
- * 3. The error-reporting function only depends on the lowest layer
- *    Prevents recursive calls from causing a stack overflow
- *    → report_error only uses SendByte, never SendString
- *
- * 4. Flag design
- *    An interrupt raises the flag, the main loop clears it automatically after consuming it, preventing duplicate handling
- *    → Battery_GetFlag() automatically clears JEOC_Status once it's read
- *
- * 5. Cache interface return values in a local variable
- *    Call the interface only once for the same piece of data, avoiding repeated calls and inconsistent data
- *    → uint16_t raw = Battery_GetVoltageAnal()
- *      then use raw for the comparisons, instead of calling Battery_GetVoltageAnal() multiple times
- *
- * Foreground-background scheduling model:
- *
- * Foreground (interrupts, urgent tasks):
- *   SysTick_Handler   → every 1ms, System_Tick++
- *   ADC1_2_IRQHandler → every 10ms, reads the ADC result, raises the flag
- *
- * Background (main loop, non-urgent tasks):
- *   Check Battery_GetFlag() → compare against thresholds, control the LEDs, print the voltage
- *   Check the tick interval → run each periodic task as needed
- *
- * Interrupt principle: the shorter the better — only gather data/raise the flag, business logic stays in the main loop
- *
- * Analogy to CODESYS:
- *   CODESYS Task (cyclic execution) ↔ main loop + tick check
- *   CODESYS Event Task              ↔ interrupt IRQHandler
- *   CODESYS global variables (GVL)  ↔ static volatile shared variables
- *   CODESYS FB encapsulation        ↔ .c/.h module encapsulation
- *   PLC scan-cycle auto-management  ↔ SysTick time base implemented by hand
- *
- * Methodology: from requirements to code
- *
- * Correct order:
- *   1. Read the schematic → build the peripheral map
- *   2. Determine the functional requirement → derive downward from the monitoring layer
- *   3. At each layer ask: what's needed? what are the constraints?
- *   4. Driver layer: configure the registers according to the peripheral map
- *   5. Acceptance: confirm the data using debug-UART prints
- *
+ * Five-layer overview (top to bottom):
+ *   Monitoring → Scheduling → Algorithm → Feedback Processing → Driver
  */
+
 int main(void)
 {
 /* 
