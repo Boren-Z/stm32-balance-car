@@ -24,8 +24,8 @@
  *
  * 对外接口（.h文件声明，外部只能看到这五个）：
  *   Encoder_Init()            → Action接口，初始化GPIO/EXTI/NVIC
- *   Encoder_Get_L_Speed()     → Get接口，左轮M法测速（两次调用间的增量）
- *   Encoder_Get_R_Speed()     → Get接口，右轮M法测速
+ *   Encoder_Get_L_Speed()     → Get interface, left wheel improved T-method speed (rad/s, auto-converges to 0 while decelerating)
+ *   Encoder_Get_R_Speed()     → Get interface, right wheel improved T-method speed (same as above)
  *   Encoder_Get_L_Position()  → Get接口，左轮累计脉冲数
  *   Encoder_Get_R_Position()  → Get接口，右轮累计脉冲数
  *
@@ -52,17 +52,11 @@
 
 
 void Encoder_Init(void);
-
-// int32_t Encoder_Get_L_Speed(void);
-
-// int32_t Encoder_Get_R_Speed(void);
-
-float   Encoder_Get_L_Speed(void);
-float   Encoder_Get_R_Speed(void);
+float Encoder_Get_L_Speed(); // Get interface, left wheel improved T-method speed (rad/s, auto-converges to 0 while decelerating)
+float Encoder_Get_R_Speed(); // right wheel 
 
 int32_t Encoder_Get_L_Position(void);
 
 int32_t Encoder_Get_R_Position(void);
-
 
 #endif	//!__MOTOR_ENCODER_H

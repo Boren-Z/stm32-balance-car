@@ -2,8 +2,6 @@
 #include "SYSTEM_TIM.h"
 
 
-
-/* T法*/
 static volatile int64_t encoder_l = 0;
 static volatile int64_t encoder_r = 0;
 static volatile int8_t  direction_l = 1;
@@ -11,39 +9,26 @@ static volatile int8_t  direction_r = 1;
 static volatile uint64_t t0_l = 0, t1_l = 0;
 static volatile uint64_t t0_r = 0, t1_r = 0;
 
-/**
- * ================================================================
- * [驱动层-内部] 编码器GPIO初始化（static）
- * ================================================================
- *
- * 职责：配置四个编码器引脚为上拉输入，解除PB3/PB4的JTAG占用
- *
- * 【为什么用上拉输入(IPU)而不是浮空输入】
- *   编码器输出是开关量电平，上拉输入提供确定的默认高电平，
- *   避免引脚悬空时因为外部干扰产生抖动误触发
- *
- * 【解除JTAG占用的两步，缺一不可】
- *   1. 必须先开启RCC_APB2Periph_AFIO时钟
- *   2. 再调用GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE)
- *   这个组合只关闭JTAG的4条额外调试线(包括TDO/NJTRST即PB3/PB4)，
- *   SWD调试用的PA13/14完全不受影响，ST-Link依然能正常连接调试
- * ================================================================
- */
+/* [Driver layer] Encoder GPIO initialization */
 static void Encoder_GPIO_Init(void)
 {
     RCC_APB2PeriphClockCmd(RCC_APB2Periph_GPIOB,ENABLE);
-    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO,ENABLE);     // 解除JTAG占用前必须先开AFIO时钟
 
-    GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE); // 释放PB3/PB4，SWD(PA13/14)不受影响
+    // The AFIO clock must be enabled before releasing the JTAG-occupied pins
+    RCC_APB2PeriphClockCmd(RCC_APB2Periph_AFIO,ENABLE);
+
+    /* Disable the JTAG's 4 extra debug lines (including TDO/NJTRST, i.e. PB3/PB4), 
+       freeing up PB3/PB4 — SWD (PA13/14) is unaffected*/
+    GPIO_PinRemapConfig(GPIO_Remap_SWJ_JTAGDisable, ENABLE); 
 
     GPIO_InitTypeDef    GPIO_InitStructure;
-    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU;             // 上拉输入，提供确定默认电平
+    GPIO_InitStructure.GPIO_Mode = GPIO_Mode_IPU; // Pull-up input, providing a definite default level
     GPIO_InitStructure.GPIO_Pin =  GPIO_Pin_3 | GPIO_Pin_4 | GPIO_Pin_14 | GPIO_Pin_15;
     GPIO_InitStructure.GPIO_Speed = GPIO_Speed_50MHz;
 
     GPIO_Init(GPIOB, &GPIO_InitStructure);
 
-    /* 只把A相(PB3/PB14)接入EXTI线，B相不需要 */
+    /* Only phase A (PB3/PB14) is connected to the EXTI line — phase B doesn't need it */
     GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource3);
     GPIO_EXTILineConfig(GPIO_PortSourceGPIOB, GPIO_PinSource14);
 }
@@ -114,24 +99,44 @@ void Encoder_Init(void)
 
 /**
  * ================================================================
- * [驱动层] M法测速（对外Get接口）
+ * [Driver layer] Improved T-method speed measurement (external Get interface)
  * ================================================================
  *
- * M法原理：返回"这次调用"和"上次调用"之间，计数值的增量
- * 调用频率固定时（比如Task_Manager里每5ms调用一次），
- * 这个增量天然就正比于转速
+ * [T-method principle]
+ *   Unlike the M-method (counting pulse increments over a fixed time
+ *   window), the T-method records the microsecond-level timestamp of
+ *   each pulse edge and computes instantaneous speed from the inverse
+ *   of the period (1/T) — noticeably more accurate than the M-method
+ *   at low speed, where pulses are sparse
  *
- * 【曾犯的错误：类型不一致】
- *   Encoder_Left_Num从int16_t升级为int32_t后（防溢出，见下方说明），
- *   这两个函数内部的Prev_Encoder_Left_Num和差值变量
- *   一度还停留在int16_t，没有跟着同步升级，
- *   导致和源头数据类型不匹配，存在隐式转换风险
- *   统一改为int32_t后类型链条才完全一致
+ * [The improvement: why not just use T = t0 - t1]
+ *   A plain T-method only uses the last complete period (t0-t1) to
+ *   compute speed. But if the wheel suddenly slows down or stops, no
+ *   new edge arrives after the last period ends, so T stays frozen at
+ *   its old value and the speed reading gets "stuck" at the
+ *   pre-deceleration level instead of dropping toward zero
+ *   Fix: also compare the time already waited since the last edge
+ *   (now-t0), and use whichever of (t0-t1) and (now-t0) is larger as T
+ *   — the slower the wheel gets, the larger now-t0 grows, so the
+ *   computed speed keeps shrinking and converges continuously to 0,
+ *   instead of staying stuck at a stale value
  *
- * 【为什么Prev_xxx要加static】
- *   必须记住"上一次调用时"的计数值才能算差值，
- *   这是static局部变量"跨调用保留状态"的典型应用场景，
- *   和GetData()里的临时变量(用完即焚、不需要static)正好相反
+ * [Returning 0 when dir == ±2: discarding the edge right after a
+ *  direction reversal]
+ *   ±2 is a temporary marker set inside the EXTI interrupt meaning
+ *   "this edge's direction is opposite to the previous one." Right
+ *   after a reversal, the interval t0-t1 spans both the forward and
+ *   reverse motion, so the T computed from it is not physically
+ *   meaningful — it's discarded and 0 is returned instead. Normal
+ *   computation resumes once the next edge confirms a steady
+ *   direction (+1/-1)
+ *
+ * [Atomic protection via __disable_irq()/__enable_irq()]
+ *   dir/t0/t1 are each updated by the EXTI interrupt, so they must be
+ *   read as a group under protection — otherwise a half-updated
+ *   combination could be read (e.g. t0 already new but t1 still old)
+ *
+ * Return value: wheel angular velocity in rad/s, sign indicates direction
  * ================================================================
  */
 
@@ -271,4 +276,37 @@ void EXTI15_10_IRQHandler(void)
     }
 }
 
+/* ================================================================
+ * 【中文对照版 —— 仅供review，确认后可删除】
+ * Encoder_Get_L_Speed() / Encoder_Get_R_Speed() 函数头注释：
+ * ================================================================
+ *
+ * [驱动层] 改进T法测速（对外Get接口）
+ *
+ * 【T法原理】
+ *   不同于M法"固定时间窗口内数脉冲增量"，T法记录相邻两次脉冲边沿的
+ *   微秒级时间戳，用周期的倒数(1/T)直接算出瞬时转速，
+ *   低速、脉冲稀疏时精度明显优于M法
+ *
+ * 【改进点：为什么不直接用T = t0 - t1】
+ *   纯T法只用"上一个完整周期"(t0-t1)算速度，
+ *   但如果车轮突然减速甚至停下，最后一个周期结束后不再有新脉冲，
+ *   T会一直停留在旧值，速度读数"卡"在减速前的水平，无法归零
+ *   解决办法：额外比较"从上次边沿到现在"已经等待的时间(now-t0)，
+ *   取(t0-t1)和(now-t0)中较大的一个作为T——
+ *   车轮越慢，now-t0增长得越大，算出的速度就越小，
+ *   读数能连续收敛到0，而不是卡死在旧值上
+ *
+ * 【dir == ±2 时直接返回0：方向刚翻转的边沿丢弃】
+ *   ±2是EXTI中断里的临时标记，表示"这一次边沿和上一次方向相反"
+ *   方向刚翻转时，t0-t1这个区间横跨了正转和反转两段时间，
+ *   算出来的T没有物理意义，所以直接丢弃返回0，
+ *   等下一个边沿到来、方向稳定为+1/-1后再正常计算
+ *
+ * 【__disable_irq()/__enable_irq()原子保护】
+ *   dir/t0/t1三个变量分别由EXTI中断更新，读取时必须成组保护，
+ *   否则可能读到"更新到一半"的组合（如t0已是新值，t1还是旧值）
+ *
+ * 返回值：轮子角速度，单位rad/s，符号表示方向
+ * ================================================================ */
 
