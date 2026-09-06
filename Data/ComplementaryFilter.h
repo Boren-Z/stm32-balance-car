@@ -19,9 +19,9 @@
  *   X-axis → direction of the wheel axle (left/right)
  *   Z-axis → perpendicular to the ground (up/down)
  *
- *   pitch = rotation about the X-axis → the vehicle tipping forward/backward, the angle the balance car needs to control
- *   roll  = rotation about the Y-axis → the vehicle body leaning side to side, used for safety-layer monitoring
- *   yaw   = rotation about the Z-axis → for future Bluetooth steering, obtained purely from GyroZ integration, no complementary filtering needed
+ *   pitch = rotation about the X-axis 
+ *   roll  = rotation about the Y-axis 
+ *   yaw   = rotation about the Z-axis 
  *
  *
  * [Core math behind the complementary filter]
@@ -49,12 +49,7 @@
  *     Analogous to a speaker crossover: the woofer + tweeter together reproduce the complete sound
  *
  * [The design decision behind dt]
- *   dt is fixed at 0.005f (a 5ms constant), not measured dynamically
- *   Reason: the PERIODIC(5) macro guarantees Update() is called exactly every 5ms, so dt is a trustworthy fixed value
  *
- * [Why only pitch is computed, not roll]
- *   pitch → the motors can actively correct it, must be controlled in real time
- *   roll  → the two wheels share the same axle, the motors physically cannot correct it; the computed value is only used by the safety layer, lower priority
  */
 
 #define GYRO_SENSITIVITY    (2000.0f / 32768.0f)    // Unit: °/s per LSB
