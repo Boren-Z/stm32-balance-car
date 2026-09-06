@@ -59,27 +59,29 @@ float Control_GetOmegaRef(void)
  * [Algorithm layer] Control initialization (external Action interface)
  *
  *
- *   Integral clamping limits:
- *   Velocity loop: ±0.5g (about ±4.9rad), corresponds to a reasonable target-tilt-angle range
- *   Angle loop: ±4π rad/s (about ±12.57), corresponds to a reasonable target-angular-velocity range
- *   Angular velocity loop: ±40π rad/s² (about ±125.7), corresponds to a reasonable angular-acceleration range
+ *   [Values redacted — kept private]
+ *   The Kp/Ki/Kd gains and integral clamping limits below were tuned
+ *   experimentally for this specific vehicle and are intentionally left
+ *   as 0.0f placeholders rather than published. Fill in your own tuned
+ *   values before running. DT is left as-is since it's a scheduling-cadence
+ *   constant, not a tuned value (see Task_Manager.c / main.c for the 5ms/1ms cadence)
  */
 void Control_Init(void)
 {
     // Velocity loop (outermost loop, 5ms)
-    PID_Init(&Para_Velocity, 7.0f, 2.0f, 0.0f, 0.5f*9.8f, -0.5f*9.8f, 0.005f);
+    PID_Init(&Para_Velocity, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.005f);
 
     // Angle loop (middle loop, 5ms)
-    PID_Init(&Para_Theta,     8.0f,  0.0f,  0.0f, 12.57f,    -12.57f,    0.005f);
+    PID_Init(&Para_Theta,     0.0f,  0.0f,  0.0f, 0.0f,    0.0f,    0.005f);
 
     // Angular velocity loop (innermost loop, 5ms)
-    PID_Init(&Para_ThetaDot,  10.0f, 10.0f, 0.0f, 125.7f,    -125.7f,    0.005f);
+    PID_Init(&Para_ThetaDot,  0.0f, 0.0f, 0.0f, 0.0f,    0.0f,    0.005f);
 
     // Motor speed loop (4th loop, 1ms)
-    PID_Init(&Para_MotorOmega_L, 0.5f, 3.0f, 0.0f, 8.4f, -8.4f, 0.001f);
-    PID_Init(&Para_MotorOmega_R, 0.5f, 3.0f, 0.0f, 8.4f, -8.4f, 0.001f);
+    PID_Init(&Para_MotorOmega_L, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.001f);
+    PID_Init(&Para_MotorOmega_R, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.001f);
 
-    PID_Init(&Para_Turn,      1.0f,  0.0f,  0.0f, 15.0f, -15.0f, 0.005f);
+    PID_Init(&Para_Turn,      0.0f,  0.0f,  0.0f, 0.0f, 0.0f, 0.005f);
 
 }
 
@@ -195,9 +197,11 @@ void Control_Update(void)
     }
     last_time = now;
 
-    // Clamp omega_ref — prevents the integrator from running away; ±10 rad/s corresponds to PWM ±100, a physically reasonable range
-    if(omega_ref >  7.0f) omega_ref =  7.0f;
-    if(omega_ref < -7.0f) omega_ref = -7.0f;
+    // Clamp omega_ref — prevents the integrator from running away.
+    // [Value redacted — kept private] The actual limit was tuned
+    // experimentally for this vehicle; left as 0.0f here, fill in your own.
+    if(omega_ref >  0.0f) omega_ref =  0.0f;
+    if(omega_ref < 0.0f) omega_ref = 0.0f;
 
     // Turn loop: reads yaw angular velocity, computes the differential correction amount
     PID_Update(&State_Turn, &Para_Turn, Imu_FB.YawDot);
@@ -242,7 +246,9 @@ void Control_Motor_Update(void)
 
     // Read battery voltage, to compensate for voltage changes
     float vbat = Battery_GetVoltage();
-    if(vbat < 6.0f) vbat = 6.0f;  // Prevent dividing by a near-zero value
+    // [Value redacted — kept private] Prevents dividing by a near-zero
+    // value; the actual floor was tuned experimentally, left as 0.0f here.
+    if(vbat < 0.0f) vbat = 0.0f;
 
     // Debug print: check the actual battery voltage
     // char buf[32];
