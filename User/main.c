@@ -96,7 +96,9 @@
  */
 int main(void)
 {
-    /* [1] NVIC priority grouping */
+/* 
+    * [1] NVIC priority grouping 
+*/
     NVIC_PriorityGroupConfig(NVIC_PriorityGroup_2);
 
 /*
