@@ -3,7 +3,8 @@
 #include "stm32f10x.h"
 
 /*
-    第一：状态机枚举。状态机相较于调度层为接口关系，所以在头文件声明
+    First: the state-machine enum. The state machine has an interface
+    relationship with the scheduling layer, so it's declared in the header
 */
 typedef	enum{
     SYS_IDLE,
@@ -11,10 +12,10 @@ typedef	enum{
     SYS_STARTUP,
     SYS_BALANCE,
     SYS_SLEEP,
-} SYS_Event; 
+} SYS_Event;
 
 
-/*第五：对外接口，主循环调用*/
+/* Fifth: external interface, called by the main loop */
 void Task_Manager_Run(void);
 
 void Task_Manager_SetEvent(SYS_Event event);

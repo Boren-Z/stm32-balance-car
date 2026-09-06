@@ -142,7 +142,7 @@ void ADC_Battery_Init(void)
 
 /**
  * [Driver layer] NVIC interrupt controller configuration
- * This module's priority: preemption 2, subpriority 2 Lower than the TIM3 time base (preemption 0), 
+ * This module's priority: preemption 2, subpriority 2 Lower than the SysTick time base (preemption 0),
  * ensuring the control cadence is never interrupted
  * ADC voltage sampling can afford to be a bit slower — occasional interruption has no impact
  */
@@ -151,7 +151,7 @@ void NVIC_Battery_Init(void)
     NVIC_InitTypeDef NVIC_InitStructure;
     NVIC_InitStructure.NVIC_IRQChannel                   = ADC1_2_IRQn; // Shares the interrupt channel with ADC2
     NVIC_InitStructure.NVIC_IRQChannelCmd                = ENABLE;
-    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;           // Lower than the TIM3 time base (0)
+    NVIC_InitStructure.NVIC_IRQChannelPreemptionPriority = 2;           // Lower than the SysTick time base (0)
     NVIC_InitStructure.NVIC_IRQChannelSubPriority        = 2;
     NVIC_Init(&NVIC_InitStructure);
 }

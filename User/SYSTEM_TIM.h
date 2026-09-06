@@ -3,74 +3,59 @@
 #include "stm32f10x.h"
 
 /**
- * ================================================================
- * 【五层塔定位】调度层核心 - 系统时基模块
- * ================================================================
+ * [Five-Layer Placement] Scheduling layer core - System time base module
  *
- * 本模块在五层塔中的位置：
+ * This module's position in the five layers:
  *
- *   监控层     → 用System_GetTick()实现超时保护（如低压持续检测）
- *   调度层     ← 本模块核心职责，提供全局时间基准
- *   算法层     → PID计算依赖固定时间间隔Δt
- *   反馈处理层 → 传感器采样周期控制
- *   驱动层     → TIM3硬件配置
+ *   Monitoring layer      → Uses System_GetTick() to implement timeout protection (e.g. sustained low-voltage detection)
+ *   Scheduling layer      ← This module's core responsibility, provides the global time reference
+ *   Algorithm layer       → PID computation depends on a fixed time interval Δt
+ *   Feedback processing   → Controls sensor sampling periods
+ *   Driver layer          → SysTick hardware configuration
  *
- * 核心思想：
- *   TIM3每1ms产生一次中断，System_Tick累加。
- *   所有任务通过"当前tick - 上次执行tick >= 目标间隔"判断是否该执行。
- *   TIM3是尺子，任务自己量时间，CPU不需要专门等待。
+ * Core idea:
+ *   SysTick generates an interrupt every 1ms, accumulating System_Tick.
+ *   Every task decides whether it should run via "current tick - last-run
+ *   tick >= target interval".
+ *   SysTick is the ruler; each task measures its own time, the CPU never
+ *   needs to wait around dedicated to any one task.
  *
- * 任务调度模式（前后台模型）：
- *   TIM3中断（前台）→ 只做tick++，越快越好
- *   主循环（后台）  → 用tick判断各任务是否该执行
+ * Task scheduling model (foreground/background):
+ *   SysTick interrupt (foreground) → only does tick++, as fast as possible
+ *   Main loop (background)         → uses tick to decide whether each task should run
  *
  *   static uint32_t last_xxx = 0;
- *   if(System_GetTick() - last_xxx >= 目标间隔ms)
+ *   if(System_GetTick() - last_xxx >= target_interval_ms)
  *   {
  *       last_xxx = System_GetTick();
- *       // 执行任务
+ *       // run the task
  *   }
  *
- * 典型任务调度表：
- *   每1ms   → 内环PID（最紧迫，直接在中断里执行）
- *   每5ms   → 外环PID
- *   每10ms  → ADC电池电压检测
- *   每100ms → 串口打印调试数据
+ * Typical task schedule:
+ *   Every 1ms   → inner-loop PID (most urgent, run directly inside the interrupt)
+ *   Every 5ms   → outer-loop PID
+ *   Every 10ms  → ADC battery voltage check
+ *   Every 100ms → send debug data over the serial port
  *
- * 与CODESYS的类比：
- *   CODESYS Task配置 ↔ System_Tick + 主循环
- *   CODESYS自动管理扫描周期，裸机需要自己用TIM3实现
- *   PLC有自己的扫描引擎，STM32你就是那个扫描引擎
+ * Analogy to CODESYS:
+ *   CODESYS Task configuration ↔ System_Tick + main loop
+ *   CODESYS manages the scan cycle automatically; bare metal has to
+ *   implement it itself with SysTick
+ *   A PLC has its own scan engine — on STM32, you are that scan engine
  *
- * 与FreeRTOS的区别：
- *   FreeRTOS：抢占式，高优先级任务可以打断低优先级任务
- *   本模块：协作式，主循环顺序扫描，任务自己决定是否执行
- *   TIM3是时钟，不是调度器；主循环才是调度器
+ * Difference from FreeRTOS:
+ *   FreeRTOS: preemptive, a higher-priority task can interrupt a lower-priority one
+ *   This module: cooperative, the main loop scans sequentially, each task decides for itself whether to run
+ *   SysTick is the clock, not the scheduler; the main loop is the scheduler
  *
- * 对外接口：
- *   TIM_System_Schedule() → TIM3初始化
- *   NVIC_System_Init()    → 中断控制器初始化
- *   System_GetTick()      → 获取当前tick值（毫秒级时间戳）
- *
- * 【曾有的疑问】
- *   Q: 为什么不直接用系统时钟SysTick？
- *   A: SysTick是Cortex-M3内核自带定时器，HAL库默认用它。
- *      标准库裸机开发SysTick未被自动配置，用TIM3是标准做法。
- *      理解了TIM3的配置，再看HAL库的SysTick会一眼看透。
- *
- *   Q: uint32_t会不会溢出？
- *   A: 会，49.7天后归零。但不影响时间差计算：
- *      无符号整数溢出后差值运算依然正确（利用补码特性）
- *      只要两次时刻间隔不超过49天，差值永远准确
- * ================================================================
  */
 
 /* ============================================================
- * 新方案：SysTick微秒级时基（对齐标准代码）
+ * New scheme: SysTick microsecond-level time base (aligned with reference code)
  * ============================================================ */
-void     System_Init(void);        // 替代TIM_System_Schedule()+NVIC_System_Init()
-uint32_t System_GetTick(void);     // 保持不变，毫秒级，兼容所有调用方
-uint64_t System_GetUs(void);       // 新增，微秒级，供PID动态deltaT使用
+void     System_Init(void);
+uint32_t System_GetTick(void);
+uint64_t System_GetUs(void);
 
 #endif  //!__SYSTEM_TIM_H
 
