@@ -785,6 +785,16 @@
               <FileType>5</FileType>
               <FilePath>.\Data\EncoderFeedback.h</FilePath>
             </File>
+            <File>
+              <FileName>KalmanFilter.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Data\KalmanFilter.c</FilePath>
+            </File>
+            <File>
+              <FileName>KalmanFilter.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Data\KalmanFilter.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -809,6 +819,21 @@
               <FileName>Control_Arrangement.h</FileName>
               <FileType>5</FileType>
               <FilePath>.\Control\Control_Arrangement.h</FilePath>
+            </File>
+          </Files>
+        </Group>
+        <Group>
+          <GroupName>Control_Advance</GroupName>
+          <Files>
+            <File>
+              <FileName>LQR.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>.\Control_Advance\LQR.c</FilePath>
+            </File>
+            <File>
+              <FileName>LQR.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>.\Control_Advance\LQR.h</FilePath>
             </File>
           </Files>
         </Group>
